@@ -1,0 +1,13 @@
+[project]
+name = "echo-backend"
+version = "1.0.0"
+description = "Echo - Real-Time AI Voice Meeting Copilot (backend)"
+requires-python = ">=3.11,<3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

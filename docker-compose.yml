@@ -1,0 +1,13 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: ./backend
+    ports:
+      - "8001:8000"
+    env_file: ./backend/.env
+    depends_on:
+      - redis

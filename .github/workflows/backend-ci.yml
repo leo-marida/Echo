@@ -1,0 +1,32 @@
+name: Backend CI
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**"]
+  pull_request:
+    paths: ["backend/**"]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      - run: ruff check .
+      - name: Run tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: redis://localhost:6379
+          API_SECRET_KEY: test-secret
+        run: pytest tests/ -v --cov=app
