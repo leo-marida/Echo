@@ -1494,12 +1494,18 @@ Do NOT move to the next phase until the current phase is fully tested and workin
 - [x] `PATCH /api/v1/meetings/{id}` for title update — pulled forward into Phase 6, report page needs inline rename
 - [x] GET `/api/v1/meetings` returns list of past meetings — pulled forward into Phase 6, the history page needed it
 - [x] Meetings history page — pulled forward into Phase 6 per design brief
-- [ ] GitHub Actions CI pipeline
-- [ ] Deploy Redis Key Value on Render
-- [ ] Deploy backend to Render, verify WebSocket + SSE work cross-origin
-- [ ] Deploy frontend to Vercel, verify CORS + wss:// connection works
-- [ ] Enable LangSmith env vars, run one production meeting, verify trace in dashboard
-- [ ] Write README with architecture diagram + demo GIF
+- [x] GitHub Actions CI pipeline — both backend-ci.yml and frontend-ci.yml pass on a real push
+- [x] Deploy Redis Key Value on Render — `echo-redis`, internal URL wired into the backend
+- [x] Deploy backend to Render, verify WebSocket + SSE work cross-origin — https://echo-api-46xw.onrender.com
+  — hit two real deploy bugs along the way: Render's default Python had drifted to 3.14 (no
+  prebuilt `pydantic-core` wheel, fixed via `backend/.python-version`), and `CORS_ORIGINS` had
+  to be updated to the real Vercel domain (not the placeholder from the original `.env.example`)
+- [x] Deploy frontend to Vercel, verify CORS + wss:// connection works — https://frontend-omega-three-29.vercel.app
+- [x] Enable LangSmith env vars, run one production meeting, verify trace in dashboard — confirmed
+  `persister`/`structurer` runs with `status=success` in the `echo` project after a real production
+  smoke test (full WebSocket audio → SSE captions → LangGraph report, verified end to end)
+- [x] Write README with architecture diagram + demo GIF — ASCII architecture diagram + a real
+  screenshot (no GIF — no screen-recording capability available)
 - [ ] Update resume with live link
 
 ---
