@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Check, ChevronRight, Copy, ChevronDown } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, ChevronRight, Copy, ChevronDown, Plus } from "lucide-react";
 import { ActionItemList } from "@/components/action-item-list";
 import { StatusIndicator } from "@/components/status-indicator";
 import {
@@ -10,7 +11,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { updateMeetingTitle } from "@/lib/api";
+import { createMeeting, updateMeetingTitle } from "@/lib/api";
 import type { Meeting, MeetingReport as MeetingReportData } from "@/lib/types";
 
 const SENTIMENT_STATUS = {
@@ -96,9 +97,18 @@ interface MeetingReportProps {
 }
 
 export function MeetingReportView({ meeting, report, onTitleChange }: MeetingReportProps) {
+  const router = useRouter();
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(meeting.title ?? "Untitled Meeting");
   const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const [startingNew, setStartingNew] = useState(false);
+
+  const handleNewMeeting = () => {
+    setStartingNew(true);
+    createMeeting()
+      .then((m) => router.push(`/meetings/${m.id}`))
+      .catch(() => setStartingNew(false));
+  };
 
   const saveTitle = () => {
     setEditingTitle(false);
@@ -147,6 +157,14 @@ export function MeetingReportView({ meeting, report, onTitleChange }: MeetingRep
             <StatusIndicator status={SENTIMENT_STATUS[report.sentiment]} />
             {report.sentiment}
           </span>
+          <button
+            onClick={handleNewMeeting}
+            disabled={startingNew}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+          >
+            <Plus size={14} />
+            {startingNew ? "Starting…" : "New Meeting"}
+          </button>
         </div>
       </div>
 

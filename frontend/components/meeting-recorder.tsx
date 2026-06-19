@@ -19,6 +19,12 @@ import { cn, formatTimer } from "@/lib/utils";
 
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000, 8_000];
 
+// Matches the backend's MAX_RECORDING_SECONDS safety cap (audio_handler.py) — OpenAI's
+// Realtime API hard-caps sessions at 60 minutes, the backend ends 1 minute early for a
+// clean flush. Warn the user 5 minutes before that so the auto-end isn't a surprise.
+const MAX_RECORDING_MS = 59 * 60 * 1000;
+const WARNING_THRESHOLD_MS = 54 * 60 * 1000;
+
 function MicPermissionHelp() {
   return (
     <div className="flex max-w-xs flex-col gap-3 text-center">
@@ -218,7 +224,19 @@ export function MeetingRecorder({
 
   return (
     <>
-      <div className="font-mono text-3xl text-foreground">{formatTimer(elapsedMs)}</div>
+      <div className="flex flex-col items-center gap-1">
+        <div className="font-mono text-3xl text-foreground">{formatTimer(elapsedMs)}</div>
+        {recordingState === "idle" && (
+          <p className="text-xs text-zinc-600">60 min max per meeting</p>
+        )}
+        {(recordingState === "recording" || recordingState === "paused") &&
+          elapsedMs >= WARNING_THRESHOLD_MS && (
+            <p className="text-xs text-status-processing">
+              {Math.max(0, Math.ceil((MAX_RECORDING_MS - elapsedMs) / 60_000))} min left — this
+              meeting will end automatically at 59 min
+            </p>
+          )}
+      </div>
 
       <button
         onClick={handleMainButtonClick}
