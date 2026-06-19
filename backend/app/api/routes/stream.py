@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from app.services.redis_service import get_redis
 from app.agent.graph import echo_graph
 from app.agent.state import MeetingState
+from app.utils.streaming import sse_event
 
 router = APIRouter()
 
@@ -18,7 +19,7 @@ async def meeting_event_generator(meeting_id: str):
     await pubsub.subscribe(f"meeting:{meeting_id}:transcript")
 
     try:
-        yield f"data: {json.dumps({'type': 'connected', 'meeting_id': meeting_id})}\n\n"
+        yield sse_event({"type": "connected", "meeting_id": meeting_id})
 
         full_transcript = []
 
@@ -30,12 +31,12 @@ async def meeting_event_generator(meeting_id: str):
             event_type = event.get("type")
 
             if event_type == "transcript_delta":
-                yield f"data: {json.dumps({'type': 'caption', 'text': event['text'], 'is_final': event['is_final']})}\n\n"
+                yield sse_event({"type": "caption", "text": event["text"], "is_final": event["is_final"]})
                 if event["is_final"]:
                     full_transcript.append(event["text"])
 
             elif event_type == "recording_ended":
-                yield f"data: {json.dumps({'type': 'processing', 'message': 'Analyzing meeting...'})}\n\n"
+                yield sse_event({"type": "processing", "message": "Analyzing meeting..."})
 
                 # Run LangGraph agent
                 transcript_text = event.get("transcript", " ".join(full_transcript))
@@ -69,7 +70,7 @@ async def meeting_event_generator(meeting_id: str):
                     "sentiment": final_state["sentiment"],
                     "transcript": transcript_text,
                 }
-                yield f"data: {json.dumps({'type': 'done', 'report': report})}\n\n"
+                yield sse_event({"type": "done", "report": report})
                 return
     finally:
         await pubsub.unsubscribe()

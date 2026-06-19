@@ -1,0 +1,191 @@
+"use client";
+
+import { useEffect, useRef, useState, useCallback } from "react";
+import { Mic, Square, Loader2 } from "lucide-react";
+import { useAudioRecorder } from "@/hooks/use-audio-recorder";
+import { useMeetingSocket } from "@/hooks/use-meeting-socket";
+import { ActionItemList } from "@/components/action-item-list";
+import { cn, formatTimer } from "@/lib/utils";
+
+const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000, 8_000];
+
+function MicPermissionHelp() {
+  return (
+    <div className="flex max-w-xs flex-col gap-3 text-center">
+      <p className="text-sm text-foreground">Microphone access is blocked</p>
+      <p className="text-[13px] leading-relaxed text-muted-foreground">
+        <span className="text-foreground">Chrome:</span> click the lock icon in the address bar →
+        Site settings → Microphone → Allow, then reload this page.
+      </p>
+      <p className="text-[13px] leading-relaxed text-muted-foreground">
+        <span className="text-foreground">Safari:</span> Safari menu → Settings → Websites →
+        Microphone → set this site to Allow, then reload this page.
+      </p>
+    </div>
+  );
+}
+
+export type RecordingState = "idle" | "recording" | "ended";
+
+interface MeetingRecorderProps {
+  meetingId: string;
+  isStale: boolean;
+  onRecordingStateChange?: (state: RecordingState) => void;
+}
+
+export function MeetingRecorder({
+  meetingId,
+  isStale,
+  onRecordingStateChange,
+}: MeetingRecorderProps) {
+  const [recordingState, setRecordingState] = useState<RecordingState>("idle");
+  const [micPermissionDenied, setMicPermissionDenied] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [reconnectIn, setReconnectIn] = useState(0);
+
+  const timerStartRef = useRef<number | null>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const intentionalDisconnectRef = useRef(false);
+  const reconnectAttemptRef = useRef(0);
+
+  const socket = useMeetingSocket(meetingId);
+  const recorder = useAudioRecorder((chunk) => socket.sendAudio(chunk));
+
+  const setState = useCallback(
+    (state: RecordingState) => {
+      setRecordingState(state);
+      onRecordingStateChange?.(state);
+    },
+    [onRecordingStateChange]
+  );
+
+  // Timer, running only while actively recording.
+  useEffect(() => {
+    if (recordingState === "recording") {
+      timerStartRef.current = Date.now() - elapsedMs;
+      timerIntervalRef.current = setInterval(() => {
+        setElapsedMs(Date.now() - (timerStartRef.current ?? Date.now()));
+      }, 1000);
+    } else if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+    }
+    return () => {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordingState]);
+
+  // Unexpected WebSocket drop mid-recording: reconnect with exponential backoff.
+  useEffect(() => {
+    if (
+      socket.status !== "disconnected" ||
+      recordingState !== "recording" ||
+      intentionalDisconnectRef.current
+    ) {
+      return;
+    }
+
+    const delay =
+      RECONNECT_DELAYS_MS[Math.min(reconnectAttemptRef.current, RECONNECT_DELAYS_MS.length - 1)];
+    setReconnecting(true);
+    setReconnectIn(delay / 1000);
+
+    const countdown = setInterval(() => {
+      setReconnectIn((prev) => Math.max(0, prev - 1));
+    }, 1000);
+
+    const timeout = setTimeout(() => {
+      reconnectAttemptRef.current += 1;
+      socket.connect();
+      setReconnecting(false);
+    }, delay);
+
+    return () => {
+      clearTimeout(timeout);
+      clearInterval(countdown);
+    };
+  }, [socket, socket.status, recordingState]);
+
+  const handleStart = useCallback(async () => {
+    try {
+      socket.connect();
+      await recorder.start();
+      intentionalDisconnectRef.current = false;
+      reconnectAttemptRef.current = 0;
+      setElapsedMs(0);
+      setState("recording");
+    } catch (err) {
+      if (err instanceof DOMException) {
+        setMicPermissionDenied(true);
+      }
+    }
+  }, [socket, recorder, setState]);
+
+  const handleEndMeeting = useCallback(() => {
+    intentionalDisconnectRef.current = true;
+    recorder.stop();
+    socket.sendStop();
+    setState("ended");
+  }, [recorder, socket, setState]);
+
+  if (micPermissionDenied) {
+    return <MicPermissionHelp />;
+  }
+
+  if (reconnecting) {
+    return (
+      <p className="text-sm text-status-processing">
+        Connection lost — attempting to reconnect… ({reconnectIn}s)
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <div className="font-mono text-3xl text-foreground">{formatTimer(elapsedMs)}</div>
+
+      <button
+        onClick={recordingState === "idle" ? handleStart : undefined}
+        disabled={recordingState === "ended"}
+        className={cn(
+          "flex h-20 w-20 items-center justify-center rounded-full bg-primary disabled:opacity-50",
+          recordingState === "recording" && "animate-pulse-ring"
+        )}
+      >
+        {recordingState === "recording" ? (
+          <Square size={28} className="text-primary-foreground" />
+        ) : recordingState === "ended" ? (
+          <Loader2 size={28} className="animate-spin text-primary-foreground" />
+        ) : (
+          <Mic size={28} className="text-primary-foreground" />
+        )}
+      </button>
+
+      <p className="text-sm text-muted-foreground">
+        {recordingState === "idle" && "Tap to start"}
+        {recordingState === "recording" && "Recording…"}
+        {recordingState === "ended" && (isStale ? "Still analyzing…" : "Analyzing…")}
+      </p>
+
+      <div className="w-full max-w-xs">
+        {/* Placeholder: the backend only runs extraction once, after the meeting
+            ends — there is no incremental mid-meeting extraction to show here yet. */}
+        <ActionItemList
+          items={[]}
+          animateNew
+          emptyText="Action items will appear here as they're detected."
+        />
+      </div>
+
+      {recordingState === "recording" && (
+        <button
+          onClick={handleEndMeeting}
+          className="text-sm text-zinc-600 transition-colors hover:text-zinc-400"
+        >
+          End Meeting
+        </button>
+      )}
+    </>
+  );
+}

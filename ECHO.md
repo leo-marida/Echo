@@ -892,6 +892,11 @@ class TranscriptionSession:
 
 ### 6.11 SSE Stream (`app/api/routes/stream.py`)
 
+Uses `sse_event()` from `app/utils/streaming.py` (Section 6.12) instead of inline f-strings —
+the original spec listed `utils/streaming.py` as the dedicated "SSE event formatter" in Section 3's
+tree, but the first draft of this file never actually used it. Pure refactor, verified the wire
+format is byte-identical before and after (`data: {"type": "connected", ...}\n\n`).
+
 ```python
 """
 SSE endpoint. Subscribes to Redis pub/sub channel for the meeting.
@@ -904,6 +909,7 @@ from fastapi.responses import StreamingResponse
 from app.services.redis_service import get_redis
 from app.agent.graph import echo_graph
 from app.agent.state import MeetingState
+from app.utils.streaming import sse_event
 
 router = APIRouter()
 
@@ -913,7 +919,7 @@ async def meeting_event_generator(meeting_id: str):
     await pubsub.subscribe(f"meeting:{meeting_id}:transcript")
 
     try:
-        yield f"data: {json.dumps({'type': 'connected', 'meeting_id': meeting_id})}\n\n"
+        yield sse_event({"type": "connected", "meeting_id": meeting_id})
 
         full_transcript = []
 
@@ -925,12 +931,12 @@ async def meeting_event_generator(meeting_id: str):
             event_type = event.get("type")
 
             if event_type == "transcript_delta":
-                yield f"data: {json.dumps({'type': 'caption', 'text': event['text'], 'is_final': event['is_final']})}\n\n"
+                yield sse_event({"type": "caption", "text": event["text"], "is_final": event["is_final"]})
                 if event["is_final"]:
                     full_transcript.append(event["text"])
 
             elif event_type == "recording_ended":
-                yield f"data: {json.dumps({'type': 'processing', 'message': 'Analyzing meeting...'})}\n\n"
+                yield sse_event({"type": "processing", "message": "Analyzing meeting..."})
 
                 # Run LangGraph agent
                 transcript_text = event.get("transcript", " ".join(full_transcript))
@@ -964,7 +970,7 @@ async def meeting_event_generator(meeting_id: str):
                     "sentiment": final_state["sentiment"],
                     "transcript": transcript_text,
                 }
-                yield f"data: {json.dumps({'type': 'done', 'report': report})}\n\n"
+                yield sse_event({"type": "done", "report": report})
                 return
     finally:
         # Runs on normal completion AND on early client disconnect (generator gets
@@ -983,6 +989,21 @@ async def stream_meeting(meeting_id: str):
             "Connection": "keep-alive",
         },
     )
+```
+
+### 6.12 SSE Event Formatter (`app/utils/streaming.py`)
+
+Not given explicit code in the original spec — just listed in Section 3's tree as "SSE event
+formatter". Deliberately minimal: a bare `data: <json>\n\n` format with no `event:` field, matching
+what the frontend's `useMeetingStream` hook actually expects (`EventSource.onmessage` only fires
+for default-type messages — adding a named `event:` field would silently break it).
+
+```python
+import json
+
+
+def sse_event(data: dict) -> str:
+    return f"data: {json.dumps(data)}\n\n"
 ```
 
 ---
