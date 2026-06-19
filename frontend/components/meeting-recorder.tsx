@@ -1,10 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Mic, Square, Loader2 } from "lucide-react";
+import { Mic, Pause, Play, Loader2 } from "lucide-react";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder";
 import { useMeetingSocket } from "@/hooks/use-meeting-socket";
 import { ActionItemList } from "@/components/action-item-list";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { cn, formatTimer } from "@/lib/utils";
 
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000, 8_000];
@@ -45,7 +55,7 @@ function StartErrorHelp({ message, onRetry }: { message: string; onRetry: () => 
 // misleading message when the real failure is something else entirely.
 const PERMISSION_ERROR_NAMES = new Set(["NotAllowedError", "PermissionDeniedError", "SecurityError"]);
 
-export type RecordingState = "idle" | "recording" | "ended";
+export type RecordingState = "idle" | "recording" | "paused" | "ended";
 
 interface MeetingRecorderProps {
   meetingId: string;
@@ -64,6 +74,7 @@ export function MeetingRecorder({
   const [elapsedMs, setElapsedMs] = useState(0);
   const [reconnecting, setReconnecting] = useState(false);
   const [reconnectIn, setReconnectIn] = useState(0);
+  const [confirmEndOpen, setConfirmEndOpen] = useState(false);
 
   const timerStartRef = useRef<number | null>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -81,7 +92,8 @@ export function MeetingRecorder({
     [onRecordingStateChange]
   );
 
-  // Timer, running only while actively recording.
+  // Timer, running only while actively recording — freezes while paused and
+  // resumes from the same elapsed value rather than resetting.
   useEffect(() => {
     if (recordingState === "recording") {
       timerStartRef.current = Date.now() - elapsedMs;
@@ -148,11 +160,35 @@ export function MeetingRecorder({
     }
   }, [socket, recorder, setState]);
 
+  // Pause/resume only stop and restart audio capture — the WebSocket stays
+  // connected throughout, so resuming doesn't need to reconnect anything.
+  const handlePause = useCallback(() => {
+    recorder.stop();
+    setState("paused");
+  }, [recorder, setState]);
+
+  const handleResume = useCallback(async () => {
+    setStartError(null);
+    try {
+      await recorder.start();
+      setState("recording");
+    } catch (err) {
+      const name = err instanceof DOMException ? err.name : undefined;
+      if (name && PERMISSION_ERROR_NAMES.has(name)) {
+        setMicPermissionDenied(true);
+      } else {
+        console.error("Failed to resume recording:", err);
+        setStartError("Couldn't resume recording. Please check your microphone and try again.");
+      }
+    }
+  }, [recorder, setState]);
+
   const handleEndMeeting = useCallback(() => {
     intentionalDisconnectRef.current = true;
     recorder.stop();
     socket.sendStop();
     setState("ended");
+    setConfirmEndOpen(false);
   }, [recorder, socket, setState]);
 
   if (micPermissionDenied) {
@@ -171,12 +207,21 @@ export function MeetingRecorder({
     );
   }
 
+  const handleMainButtonClick =
+    recordingState === "idle"
+      ? handleStart
+      : recordingState === "recording"
+        ? handlePause
+        : recordingState === "paused"
+          ? handleResume
+          : undefined;
+
   return (
     <>
       <div className="font-mono text-3xl text-foreground">{formatTimer(elapsedMs)}</div>
 
       <button
-        onClick={recordingState === "idle" ? handleStart : undefined}
+        onClick={handleMainButtonClick}
         disabled={recordingState === "ended"}
         className={cn(
           "flex h-20 w-20 items-center justify-center rounded-full bg-primary disabled:opacity-50",
@@ -184,7 +229,9 @@ export function MeetingRecorder({
         )}
       >
         {recordingState === "recording" ? (
-          <Square size={28} className="text-primary-foreground" />
+          <Pause size={28} className="text-primary-foreground" />
+        ) : recordingState === "paused" ? (
+          <Play size={28} className="text-primary-foreground" />
         ) : recordingState === "ended" ? (
           <Loader2 size={28} className="animate-spin text-primary-foreground" />
         ) : (
@@ -195,6 +242,7 @@ export function MeetingRecorder({
       <p className="text-sm text-muted-foreground">
         {recordingState === "idle" && "Tap to start"}
         {recordingState === "recording" && "Recording…"}
+        {recordingState === "paused" && "Paused"}
         {recordingState === "ended" && (isStale ? "Still analyzing…" : "Analyzing…")}
       </p>
 
@@ -208,13 +256,32 @@ export function MeetingRecorder({
         />
       </div>
 
-      {recordingState === "recording" && (
-        <button
-          onClick={handleEndMeeting}
-          className="text-sm text-zinc-600 transition-colors hover:text-zinc-400"
-        >
-          End Meeting
-        </button>
+      {(recordingState === "recording" || recordingState === "paused") && (
+        <Dialog open={confirmEndOpen} onOpenChange={setConfirmEndOpen}>
+          <DialogTrigger className="rounded-lg border border-destructive/40 px-4 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10">
+            End Meeting
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>End this meeting?</DialogTitle>
+              <DialogDescription>
+                This stops recording and starts analyzing the transcript. You won&apos;t be able
+                to resume once it&apos;s ended.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <DialogClose className="rounded-lg border border-[#2a2a2a] px-4 py-2 text-sm text-foreground transition-colors hover:bg-secondary">
+                Cancel
+              </DialogClose>
+              <button
+                onClick={handleEndMeeting}
+                className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+              >
+                End Meeting
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </>
   );
