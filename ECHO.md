@@ -1312,7 +1312,11 @@ ruff==0.6.0
 1. Push `backend/` to GitHub
 2. Render Dashboard → New → Web Service
 3. Connect repo, set **Root Directory:** `backend`
-4. **Runtime:** Python 3.11
+4. **Runtime:** Python 3.11 — selecting "Python 3" in Render's dropdown does NOT pin the minor
+   version; by 2026 Render's default had drifted to 3.14, which has no prebuilt wheel for
+   `pydantic-core==2.20.0` and falls back to compiling it from Rust source, which fails on
+   Render's read-only build filesystem. Pin it for real via `backend/.python-version`
+   containing `3.11.9` (committed to the repo) — confirmed this actually fixes the build.
 5. **Build Command:** `pip install -r requirements.txt`
 6. **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 7. Add all env vars from `.env`
