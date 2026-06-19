@@ -4,6 +4,13 @@ Speak into your browser, watch live captions appear word by word, and get a stru
 meeting report — summary, action items with owners, key decisions, topics, attendees —
 the moment you stop recording.
 
+**Live app:** https://frontend-omega-three-29.vercel.app
+**API:** https://echo-api-46xw.onrender.com
+
+> Note: the live app is mid-deploy — backend and frontend are both up, but a CORS
+> configuration issue between them is still being resolved. Full local setup below
+> works end-to-end today; see `ECHO.md` Section 9 for deployment details.
+
 ![Echo landing page](docs/screenshot-landing.png)
 
 ## What it does
