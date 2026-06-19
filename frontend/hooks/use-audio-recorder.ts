@@ -1,7 +1,6 @@
 import { useRef, useState, useCallback } from "react";
 
 const SAMPLE_RATE = 24000;
-const CHUNK_INTERVAL_MS = 100;
 
 function float32ToPCM16(float32Array: Float32Array): ArrayBuffer {
   const pcm16 = new Int16Array(float32Array.length);
@@ -33,8 +32,11 @@ export function useAudioRecorder(onChunk: (pcm16: ArrayBuffer) => void) {
     contextRef.current = ctx;
 
     const source = ctx.createMediaStreamSource(stream);
-    // ScriptProcessorNode fires every bufferSize samples
-    const bufferSize = Math.floor((SAMPLE_RATE * CHUNK_INTERVAL_MS) / 1000);
+    // ScriptProcessorNode fires every bufferSize samples. bufferSize MUST be a power
+    // of two between 256–16384 — the naive (SAMPLE_RATE * CHUNK_INTERVAL_MS) / 1000
+    // = 2400 is not valid and throws IndexSizeError on every call, in every browser.
+    // 2048 is the closest valid size (~85ms @ 24kHz vs. the intended ~100ms).
+    const bufferSize = 2048;
     const processor = ctx.createScriptProcessor(bufferSize, 1, 1);
     processorRef.current = processor;
 

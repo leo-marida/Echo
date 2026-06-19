@@ -1012,11 +1012,33 @@ def sse_event(data: dict) -> str:
 
 ### 7.1 Audio Recorder Hook (`frontend/hooks/use-audio-recorder.ts`)
 
+**Critical bug found via live browser testing (not just code review):** the original
+`bufferSize = Math.floor((SAMPLE_RATE * CHUNK_INTERVAL_MS) / 1000)` calculation produces
+2400 — but `createScriptProcessor` requires a power of two between 256–16384, and throws
+`IndexSizeError` for any other value. This meant recording was completely broken for every
+user regardless of microphone permission. Reproduced with headless Chrome's
+`--use-fake-device-for-media-stream --use-fake-ui-for-media-stream` flags (auto-grants mic
+permission) driven via the DevTools Protocol, confirmed the exact exception, fixed the
+constant to `2048` (closest valid power of two, ~85ms @ 24kHz vs. the intended ~100ms), then
+re-ran the same click-through (Start Meeting → mic button) and confirmed "Recording…" with
+the timer ticking — no exception. `CHUNK_INTERVAL_MS` is removed since it's no longer used
+in the (now-fixed) calculation. This is the one deviation from "use this hook exactly as
+specified" — a hook that throws on every real invocation isn't something to ship as-is.
+
+This also exposed a second bug in `components/meeting-recorder.tsx`: its error handler
+caught any `DOMException` from `recorder.start()` and showed "Microphone access is
+blocked" — but `getUserMedia`/`AudioContext`/`createScriptProcessor` all throw
+`DOMException` for plenty of reasons unrelated to permission (this `IndexSizeError` being
+exactly one). Fixed to check `err.name` against the actual permission-related error names
+(`NotAllowedError`, `PermissionDeniedError`, `SecurityError`) and show a generic
+"couldn't start recording, try again" message for anything else — so a real user hitting
+some other failure gets an accurate message instead of being told to go check Chrome's
+site settings for a permission they already granted.
+
 ```typescript
 import { useRef, useState, useCallback } from "react";
 
 const SAMPLE_RATE = 24000;
-const CHUNK_INTERVAL_MS = 100;
 
 function float32ToPCM16(float32Array: Float32Array): ArrayBuffer {
   const pcm16 = new Int16Array(float32Array.length);
@@ -1048,8 +1070,11 @@ export function useAudioRecorder(onChunk: (pcm16: ArrayBuffer) => void) {
     contextRef.current = ctx;
 
     const source = ctx.createMediaStreamSource(stream);
-    // ScriptProcessorNode fires every bufferSize samples
-    const bufferSize = Math.floor((SAMPLE_RATE * CHUNK_INTERVAL_MS) / 1000);
+    // ScriptProcessorNode fires every bufferSize samples. bufferSize MUST be a power
+    // of two between 256–16384 — the naive (SAMPLE_RATE * CHUNK_INTERVAL_MS) / 1000
+    // = 2400 is not valid and throws IndexSizeError on every call, in every browser.
+    // 2048 is the closest valid size (~85ms @ 24kHz vs. the intended ~100ms).
+    const bufferSize = 2048;
     const processor = ctx.createScriptProcessor(bufferSize, 1, 1);
     processorRef.current = processor;
 

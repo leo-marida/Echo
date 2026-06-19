@@ -25,6 +25,26 @@ function MicPermissionHelp() {
   );
 }
 
+function StartErrorHelp({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex max-w-xs flex-col items-center gap-3 text-center">
+      <p className="text-sm text-foreground">{message}</p>
+      <button
+        onClick={onRetry}
+        className="rounded-lg border border-[#2a2a2a] px-4 py-2 text-sm text-foreground transition-colors hover:bg-secondary"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+
+// getUserMedia/AudioContext/ScriptProcessorNode can all throw DOMException for reasons
+// that have nothing to do with permission (e.g. invalid buffer size, no device found,
+// hardware errors) — treating every DOMException as "permission denied" produces a
+// misleading message when the real failure is something else entirely.
+const PERMISSION_ERROR_NAMES = new Set(["NotAllowedError", "PermissionDeniedError", "SecurityError"]);
+
 export type RecordingState = "idle" | "recording" | "ended";
 
 interface MeetingRecorderProps {
@@ -40,6 +60,7 @@ export function MeetingRecorder({
 }: MeetingRecorderProps) {
   const [recordingState, setRecordingState] = useState<RecordingState>("idle");
   const [micPermissionDenied, setMicPermissionDenied] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [reconnecting, setReconnecting] = useState(false);
   const [reconnectIn, setReconnectIn] = useState(0);
@@ -108,6 +129,7 @@ export function MeetingRecorder({
   }, [socket, socket.status, recordingState]);
 
   const handleStart = useCallback(async () => {
+    setStartError(null);
     try {
       socket.connect();
       await recorder.start();
@@ -116,8 +138,12 @@ export function MeetingRecorder({
       setElapsedMs(0);
       setState("recording");
     } catch (err) {
-      if (err instanceof DOMException) {
+      const name = err instanceof DOMException ? err.name : undefined;
+      if (name && PERMISSION_ERROR_NAMES.has(name)) {
         setMicPermissionDenied(true);
+      } else {
+        console.error("Failed to start recording:", err);
+        setStartError("Couldn't start recording. Please check your microphone and try again.");
       }
     }
   }, [socket, recorder, setState]);
@@ -131,6 +157,10 @@ export function MeetingRecorder({
 
   if (micPermissionDenied) {
     return <MicPermissionHelp />;
+  }
+
+  if (startError) {
+    return <StartErrorHelp message={startError} onRetry={() => setStartError(null)} />;
   }
 
   if (reconnecting) {
