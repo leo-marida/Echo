@@ -1541,7 +1541,16 @@ Do NOT move to the next phase until the current phase is fully tested and workin
 - Audio size guard: if PCM16 chunk exceeds expected size (>10KB per 100ms), drop it
 - Environment: `DATABASE_URL` (Neon connection string) backend-only, never in frontend env
 - `.gitignore` must include `.env*` before first commit
-- Add `Content-Security-Policy` header in Next.js config
+- Add `Content-Security-Policy` header in Next.js config — this one was actually missed
+  during the original frontend build (caught in a later audit pass). Implemented in
+  `frontend/next.config.ts` via `headers()`: `connect-src` is derived from
+  `NEXT_PUBLIC_API_URL` at build time (rewriting `http`→`ws` for the WebSocket origin) so
+  it resolves correctly in both local dev and production without hardcoding a domain.
+  `script-src`/`style-src` need `'unsafe-inline'` (and `script-src` needs `'unsafe-eval'`)
+  because Next.js's default hydration scripts aren't nonce-based here — a stricter
+  nonce-based CSP is possible but requires middleware changes beyond what this rule asked
+  for. Verified via curl that the header renders with the correct dynamic origin, and via
+  screenshot that the page still renders correctly with the policy active.
 
 ---
 
