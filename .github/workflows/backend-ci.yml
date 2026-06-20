@@ -29,4 +29,5 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           REDIS_URL: redis://localhost:6379
           API_SECRET_KEY: test-secret
+          BACKEND_JWT_SECRET: test-jwt-secret
         run: pytest tests/ -v --cov=app
