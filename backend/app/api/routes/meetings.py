@@ -1,9 +1,10 @@
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.api.deps import get_current_user, require_user
 from app.services import meeting_service
 
 router = APIRouter()
@@ -52,15 +53,22 @@ def _to_response(record) -> MeetingResponse:
 
 
 @router.post("/meetings", response_model=MeetingResponse)
-async def create_meeting(payload: CreateMeetingRequest):
-    record = await meeting_service.create_meeting(payload.title)
+async def create_meeting(payload: CreateMeetingRequest, user=Depends(get_current_user)):
+    record = await meeting_service.create_meeting(payload.title, user["id"] if user else None)
     return _to_response(record)
 
 
 @router.get("/meetings", response_model=list[MeetingResponse])
-async def list_meetings():
-    records = await meeting_service.list_meetings()
+async def list_meetings(user=Depends(require_user)):
+    records = await meeting_service.list_meetings(user["id"])
     return [_to_response(record) for record in records]
+
+
+@router.delete("/meetings/{meeting_id}", status_code=204)
+async def discard_meeting(meeting_id: UUID, user=Depends(require_user)):
+    deleted = await meeting_service.delete_meeting(str(meeting_id), user["id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Meeting not found")
 
 
 @router.get("/meetings/{meeting_id}", response_model=MeetingResponse)

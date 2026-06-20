@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000"
     ENVIRONMENT: str = "development"
 
+    # Shared with the frontend's NextAuth config (AUTH_SECRET) — used to verify the
+    # custom backend-auth JWT minted on sign-in. See app/services/auth_service.py.
+    BACKEND_JWT_SECRET: str
+
     AUDIO_SAMPLE_RATE: int = 24000
     AUDIO_CHUNK_DURATION_MS: int = 100
 

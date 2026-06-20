@@ -11,15 +11,16 @@ def _sanitize_transcript_text(text: str) -> str:
     return _CONTROL_CHARS_RE.sub("", text)
 
 
-async def create_meeting(title: str | None) -> asyncpg.Record:
+async def create_meeting(title: str | None, user_id: str | None = None) -> asyncpg.Record:
     pool = get_db_pool()
     return await pool.fetchrow(
         """
-        INSERT INTO meetings (title)
-        VALUES ($1)
+        INSERT INTO meetings (title, user_id)
+        VALUES ($1, $2)
         RETURNING id, title, status, started_at, ended_at, duration_seconds, created_at, updated_at
         """,
         title,
+        user_id,
     )
 
 
@@ -35,15 +36,35 @@ async def get_meeting(meeting_id: str) -> asyncpg.Record | None:
     )
 
 
-async def list_meetings() -> list[asyncpg.Record]:
+async def list_meetings(user_id: str) -> list[asyncpg.Record]:
+    """Scoped to a single user — there is no "list all meetings" mode. Anonymous
+    (no-account) meetings have no owner and are never returned by this; they exist
+    only as direct links, not in anyone's history.
+    """
     pool = get_db_pool()
     return await pool.fetch(
         """
         SELECT id, title, status, started_at, ended_at, duration_seconds, created_at, updated_at
         FROM meetings
+        WHERE user_id = $1
         ORDER BY created_at DESC
-        """
+        """,
+        user_id,
     )
+
+
+async def delete_meeting(meeting_id: str, user_id: str) -> bool:
+    """Ownership-checked delete ("discard") — returns False if the meeting doesn't
+    exist or isn't owned by this user, so callers can return 404 either way without
+    leaking which case it was.
+    """
+    pool = get_db_pool()
+    result = await pool.execute(
+        "DELETE FROM meetings WHERE id = $1 AND user_id = $2",
+        meeting_id,
+        user_id,
+    )
+    return result == "DELETE 1"
 
 
 async def get_meeting_report(meeting_id: str) -> asyncpg.Record | None:

@@ -214,7 +214,23 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000           # dev
 
 ## 5. Database Schema (Neon SQL Editor)
 
+`users` and `meetings.user_id` were added later (not in the original spec) for the accounts
+feature — see Section 5b for why `user_id` is nullable and how this was actually migrated on
+the live database (this doc shows the schema in dependency order for a fresh setup; on our
+real Neon instance, `meetings` already existed, so this was applied as `CREATE TABLE users`
+followed by `ALTER TABLE meetings ADD COLUMN user_id ...` rather than inline).
+
 ```sql
+-- Users table (Google OAuth identity, owned by our backend — not a NextAuth adapter table)
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  google_id TEXT UNIQUE NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  name TEXT,
+  avatar_url TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Meetings table
 CREATE TABLE meetings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -225,6 +241,7 @@ CREATE TABLE meetings (
   ended_at TIMESTAMPTZ,
   duration_seconds INTEGER,
   raw_transcript TEXT,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,  -- nullable: see Section 5b
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -258,11 +275,39 @@ CREATE INDEX idx_transcript_segments_meeting ON transcript_segments(meeting_id);
 CREATE INDEX idx_transcript_segments_final ON transcript_segments(meeting_id, is_final);
 CREATE INDEX idx_meetings_status ON meetings(status);
 CREATE INDEX idx_meetings_created ON meetings(created_at DESC);
+CREATE INDEX idx_meetings_user_id ON meetings(user_id);
 
 -- RLS
 ALTER TABLE meetings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transcript_segments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE meeting_reports ENABLE ROW LEVEL SECURITY;
+```
+
+> **Note on RLS:** these `ENABLE ROW LEVEL SECURITY` statements have no actual policies defined,
+> and our backend always connects as the table owner (`neondb_owner`), which bypasses RLS by
+> default in Postgres regardless of whether it's enabled (unless `FORCE ROW LEVEL SECURITY` is
+> also set, which it isn't). So this was already inert before the accounts feature, and remains
+> so — per-user access control is enforced entirely in the FastAPI application layer (filtering
+> queries by `user_id`), not via Postgres RLS policies.
+
+### 5b. Accounts migration notes
+
+`user_id` is **nullable** — meetings created without signing in stay fully anonymous (no
+owner, not tied to any account), preserving the original "no account needed · free to try"
+promise on the landing page for one-off use. Signing in only adds *persistent, scoped*
+history on top of that; it was never meant to gate the core recording feature itself.
+
+On the live Neon database, this was applied as:
+```sql
+CREATE TABLE users (...);  -- as above
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_meetings_user_id ON meetings(user_id);
+```
+
+`users` is owned and populated entirely by our own FastAPI backend (upserted on first
+authenticated request, see Section 6.13) — it is **not** a NextAuth/Auth.js adapter table.
+NextAuth only drives the Google OAuth dance on the frontend; it never talks to Postgres
+directly.
 ```
 
 ---
@@ -1044,6 +1089,106 @@ import json
 def sse_event(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 ```
+
+---
+
+### 6.13 Authentication (`app/services/auth_service.py`, `app/api/deps.py`) — added later, not in the original spec
+
+User accounts were added after the original build: Google sign-in only (no passwords for us
+to manage), implemented as NextAuth.js (Auth.js) on the frontend handling the OAuth dance, plus
+a small custom signed JWT (HS256, `BACKEND_JWT_SECRET` — shared with the frontend's
+`AUTH_SECRET`) that the frontend sends as `Authorization: Bearer <token>` to this backend.
+Deliberately **not** a NextAuth database adapter — `users` is owned and populated entirely by
+this backend, upserted on every authenticated request, so there's no separate "create the user
+record" step to keep in sync.
+
+`get_current_user` (optional) and `require_user` (mandatory) are two different FastAPI
+dependencies because the app has two real access patterns to support, not one:
+- **No `Authorization` header at all** → anonymous, returns `None`. This is the *normal* case
+  for one-off use — the landing page's "no account needed" promise still holds; meetings
+  created this way get `user_id = NULL` and are never gated behind login.
+- **A header that IS present but invalid or expired** → raises 401, not a silent fallback to
+  anonymous. If it silently degraded, a stale frontend session could *look* logged in (showing
+  the user's name/avatar) while every request was quietly going unattributed — meetings the
+  user thinks are being saved to their account just wouldn't be. Better to surface it.
+
+`require_user` builds on `get_current_user` and just adds the "and it must not be `None`" check
+— used by `GET /meetings` (history) and `DELETE /meetings/{id}` (discard), both of which only
+make sense for a signed-in identity.
+
+```python
+# app/services/auth_service.py
+import jwt
+from app.config import settings
+from app.db.client import get_db_pool
+
+ALGORITHM = "HS256"
+
+
+class InvalidTokenError(Exception):
+    pass
+
+
+def decode_token(token: str) -> dict:
+    try:
+        return jwt.decode(token, settings.BACKEND_JWT_SECRET, algorithms=[ALGORITHM])
+    except jwt.PyJWTError as exc:
+        raise InvalidTokenError(str(exc)) from exc
+
+
+async def upsert_user(google_id: str, email: str, name: str | None, avatar_url: str | None):
+    pool = get_db_pool()
+    return await pool.fetchrow(
+        """
+        INSERT INTO users (google_id, email, name, avatar_url)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (google_id) DO UPDATE SET
+            email = EXCLUDED.email, name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url
+        RETURNING id, google_id, email, name, avatar_url, created_at
+        """,
+        google_id, email, name, avatar_url,
+    )
+```
+
+```python
+# app/api/deps.py
+from fastapi import Depends, Header, HTTPException
+from app.services.auth_service import InvalidTokenError, decode_token, upsert_user
+
+
+async def get_current_user(authorization: str | None = Header(default=None)):
+    if authorization is None:
+        return None
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+    token = authorization.removeprefix("Bearer ")
+    try:
+        claims = decode_token(token)
+    except InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    google_id, email = claims.get("sub"), claims.get("email")
+    if not google_id or not email:
+        raise HTTPException(status_code=401, detail="Invalid session token")
+    return await upsert_user(google_id, email, claims.get("name"), claims.get("picture"))
+
+
+async def require_user(user=Depends(get_current_user)):
+    if user is None:
+        raise HTTPException(status_code=401, detail="Sign in required")
+    return user
+```
+
+**Meetings scoping (`app/services/meeting_service.py`, `app/api/routes/meetings.py`):**
+`create_meeting` now takes an optional `user_id` — `None` for anonymous, set for signed-in
+users. `list_meetings(user_id)` is **mandatory**-scoped — there is no "list everyone's
+meetings" mode; before accounts existed, `GET /meetings` returned every meeting ever created
+by anyone, which was already a latent privacy gap once more than one person used the deployed
+app, just never exercised since nothing built a multi-user history view yet. `delete_meeting`
+("discard") checks `WHERE id = $1 AND user_id = $2` so cross-user deletion attempts get a 404
+— the same 404 a nonexistent meeting would give, so the response never reveals which case it
+was. Verified all of this live (anonymous create, owned create, cross-user list isolation,
+cross-user delete rejection, owner delete success, missing-auth 401, invalid-token 401) against
+the real Neon database before committing.
 
 ---
 
