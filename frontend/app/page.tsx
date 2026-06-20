@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession, signIn } from "next-auth/react";
 import { createMeeting } from "@/lib/api";
+import { AccountMenu } from "@/components/account-menu";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const RETRY_INTERVAL_MS = 3_000;
 const SLOW_WAKE_THRESHOLD_MS = 60_000;
@@ -23,16 +26,22 @@ function SoundWave() {
 
 export default function HomePage() {
   const router = useRouter();
+  const { data: session, status: sessionStatus } = useSession();
   const [isStarting, setIsStarting] = useState(false);
   const [isSlow, setIsSlow] = useState(false);
 
   const handleStart = () => {
+    if (!session) {
+      signIn("google");
+      return;
+    }
+
     setIsStarting(true);
     setIsSlow(false);
     const startedAt = Date.now();
 
     const attempt = () => {
-      createMeeting()
+      createMeeting(null, session.backendToken)
         .then((meeting) => {
           router.push(`/meetings/${meeting.id}`);
         })
@@ -49,6 +58,11 @@ export default function HomePage() {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center px-6">
+      <div className="absolute top-6 right-6 flex items-center gap-3">
+        <ThemeToggle />
+        <AccountMenu />
+      </div>
+
       <div className="flex flex-col items-center gap-8">
         <div className="flex items-center gap-2.5">
           <SoundWave />
@@ -61,13 +75,19 @@ export default function HomePage() {
 
         <button
           onClick={handleStart}
-          disabled={isStarting}
-          className="flex h-11 w-40 items-center justify-center rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+          disabled={isStarting || sessionStatus === "loading"}
+          className="flex h-11 w-48 items-center justify-center rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
         >
-          {isStarting ? (isSlow ? "Waking up server…" : "Starting…") : "Start Meeting"}
+          {isStarting
+            ? isSlow
+              ? "Waking up server…"
+              : "Starting…"
+            : session
+              ? "Start Meeting"
+              : "Sign in to start"}
         </button>
 
-        <p className="text-[13px] text-zinc-600">No account needed · Free to try</p>
+        <p className="text-[13px] text-zinc-600">Sign in with Google · Free to use</p>
       </div>
     </main>
   );

@@ -1190,6 +1190,16 @@ was. Verified all of this live (anonymous create, owned create, cross-user list 
 cross-user delete rejection, owner delete success, missing-auth 401, invalid-token 401) against
 the real Neon database before committing.
 
+**Follow-up tightening, same day:** sign-in is now *required* to start a meeting at all —
+`POST /meetings` switched from `get_current_user` (optional) to `require_user` (mandatory).
+The nullable `user_id` column and anonymous-flow plumbing in `meeting_service.py` are left in
+place (harmless, and avoids a migration), but the application-layer policy is now "you must be
+signed in," full stop — this was a deliberate reversal of the original "no account needed"
+design after live use surfaced that letting anyone start an unattributed meeting wasn't
+actually wanted. The landing page's tagline changed from "No account needed · Free to try" to
+"Sign in with Google · Free to use" to match. A client-side-only gate would've been trivially
+bypassed by hitting the API directly, so this is enforced server-side, not just hidden in the UI.
+
 ---
 
 ## 7. Frontend Implementation
@@ -1492,6 +1502,40 @@ export type MeetingSSEEvent =
   | { type: "done"; report: MeetingReport }
   | { type: "error"; message: string };
 ```
+
+### 7.5 Auth UI, theme system, and a dashboard-vs-recording conflict — added later, not in the original spec
+
+Three more fixes that came out of actually using the auth feature, not from the original plan:
+
+**Session loading flash.** `useSession()` starts in a `"loading"` state and fetches
+`/api/auth/session` itself on mount — the visible delay before the sign-in button appeared was
+that round-trip. Fixed by fetching the session server-side in `app/layout.tsx` via `auth()` (a
+Server Component, `RootLayout` is now `async`) and passing it into `SessionProvider`'s `session`
+prop — `useSession()` then starts already-resolved on the client. `<html>` needs
+`suppressHydrationWarning` since `next-themes` (below) mutates its class before React hydrates.
+
+**Light/dark mode.** The original design was dark-only — `:root` held the dark palette directly,
+with no light variant anywhere. Added `next-themes` (`attribute="class"`, `defaultTheme="dark"`,
+`enableSystem`). Restructured `globals.css`: `:root` now holds only theme-independent values
+(`--radius`), and the former `:root` block became an explicit `.dark { ... }` block, with a new
+`.light { ... }` block mirroring its structure (same semantic colors — `--destructive`,
+`--status-recording`, etc. — stay identical across themes; only the neutral background/foreground/
+border/card scale and the indigo-chip pair invert). `ThemeToggle`
+(`components/theme-toggle.tsx`) guards against rendering before mount — `resolvedTheme` is
+`undefined` during SSR since it depends on `localStorage`, so rendering an icon before the client
+resolves it would flash the wrong one. Verified via computed-style checks (`--background`
+actually resolving to the right hex per theme) rather than relying on headless screenshots alone
+— repeatedly reusing one long-lived CDP tab across separate script runs produced stale-frame
+screenshots that *looked* like the toggle didn't work even though the DOM was correct; a fresh
+single-script run with `getComputedStyle` confirmed the real behavior was right all along.
+
+**Dashboard access during an active recording.** The live meeting page
+(`app/meetings/[meetingId]/page.tsx`) holds the WebSocket and audio capture in `MeetingRecorder`'s
+component state — navigating to `/meetings` in-place would unmount the page and tear down the
+recording mid-session. Fixed with a `Dashboard ↗` link using `target="_blank"` so history opens
+in a new browser tab, leaving the recording tab (and its WebSocket/audio capture) completely
+untouched. Simpler and lower-risk than moving recording state into a persistent layout-level
+provider, which would have been a much bigger architectural change for the same outcome.
 
 ---
 

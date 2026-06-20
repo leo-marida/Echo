@@ -48,7 +48,13 @@
 }
 
 :root {
-    /* Dark-mode-first: this IS the only theme, no light variant */
+    --radius: 0.5rem;
+}
+
+/* Dark was the original (and, until now, only) theme — kept as its own explicit
+   class rather than the bare :root default so next-themes' class-attribute
+   strategy can switch between .dark and .light without us re-deriving values. */
+.dark {
     --background: #0a0a0a;
     --foreground: #fafafa;
     --card: #111111;
@@ -67,7 +73,6 @@
     --border: #1f1f1f;
     --input: #2a2a2a;
     --ring: #6366f1;
-    --radius: 0.5rem;
     --sidebar: #111111;
     --sidebar-foreground: #fafafa;
     --sidebar-primary: #6366f1;
@@ -84,6 +89,45 @@
     --status-idle: #3f3f46;
     --owner-chip-bg: #1e1b4b;
     --owner-chip-foreground: #818cf8;
+    --zinc-600: #52525b;
+    --zinc-500: #71717a;
+}
+
+.light {
+    --background: #ffffff;
+    --foreground: #0a0a0a;
+    --card: #f4f4f5;
+    --card-foreground: #0a0a0a;
+    --popover: #ffffff;
+    --popover-foreground: #0a0a0a;
+    --primary: #6366f1;
+    --primary-foreground: #ffffff;
+    --secondary: #f4f4f5;
+    --secondary-foreground: #0a0a0a;
+    --muted: #f4f4f5;
+    --muted-foreground: #71717a;
+    --accent: #f4f4f5;
+    --accent-foreground: #0a0a0a;
+    --destructive: #ef4444;
+    --border: #e4e4e7;
+    --input: #d4d4d8;
+    --ring: #6366f1;
+    --sidebar: #f4f4f5;
+    --sidebar-foreground: #0a0a0a;
+    --sidebar-primary: #6366f1;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #f4f4f5;
+    --sidebar-accent-foreground: #0a0a0a;
+    --sidebar-border: #e4e4e7;
+    --sidebar-ring: #6366f1;
+
+    /* Echo-specific tokens */
+    --status-recording: #ef4444;
+    --status-processing: #f59e0b;
+    --status-complete: #22c55e;
+    --status-idle: #a1a1aa;
+    --owner-chip-bg: #e0e7ff;
+    --owner-chip-foreground: #4338ca;
     --zinc-600: #52525b;
     --zinc-500: #71717a;
 }

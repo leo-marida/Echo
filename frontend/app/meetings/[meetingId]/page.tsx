@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { getMeeting, getMeetingReport } from "@/lib/api";
 import { useMeetingStream } from "@/hooks/use-meeting-stream";
 import { LiveTranscript } from "@/components/live-transcript";
@@ -134,6 +136,20 @@ export default function MeetingPage() {
 
   return (
     <main className="flex min-h-screen flex-col lg:flex-row">
+      <div className="absolute top-6 right-6 z-10 flex items-center gap-4">
+        <ThemeToggle />
+        {/* Opens in a new tab deliberately — navigating here in-place would unmount
+            this page and tear down the active WebSocket/audio capture mid-recording. */}
+        <Link
+          href="/meetings"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Dashboard ↗
+        </Link>
+      </div>
+
       <LiveTranscript
         segments={stream.segments}
         partial={stream.partial}

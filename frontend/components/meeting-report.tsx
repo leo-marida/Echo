@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession, signIn } from "next-auth/react";
 import { Check, ChevronRight, Copy, ChevronDown, Plus } from "lucide-react";
 import { ActionItemList } from "@/components/action-item-list";
 import { StatusIndicator } from "@/components/status-indicator";
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Collapsible,
   CollapsibleContent,
@@ -98,14 +100,19 @@ interface MeetingReportProps {
 
 export function MeetingReportView({ meeting, report, onTitleChange }: MeetingReportProps) {
   const router = useRouter();
+  const { data: session } = useSession();
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(meeting.title ?? "Untitled Meeting");
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [startingNew, setStartingNew] = useState(false);
 
   const handleNewMeeting = () => {
+    if (!session) {
+      signIn("google");
+      return;
+    }
     setStartingNew(true);
-    createMeeting()
+    createMeeting(null, session.backendToken)
       .then((m) => router.push(`/meetings/${m.id}`))
       .catch(() => setStartingNew(false));
   };
@@ -163,8 +170,9 @@ export function MeetingReportView({ meeting, report, onTitleChange }: MeetingRep
             className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
           >
             <Plus size={14} />
-            {startingNew ? "Starting…" : "New Meeting"}
+            {startingNew ? "Starting…" : session ? "New Meeting" : "Sign in to start"}
           </button>
+          <ThemeToggle />
         </div>
       </div>
 

@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.api.deps import get_current_user, require_user
+from app.api.deps import require_user
 from app.services import meeting_service
 
 router = APIRouter()
@@ -53,8 +53,8 @@ def _to_response(record) -> MeetingResponse:
 
 
 @router.post("/meetings", response_model=MeetingResponse)
-async def create_meeting(payload: CreateMeetingRequest, user=Depends(get_current_user)):
-    record = await meeting_service.create_meeting(payload.title, user["id"] if user else None)
+async def create_meeting(payload: CreateMeetingRequest, user=Depends(require_user)):
+    record = await meeting_service.create_meeting(payload.title, user["id"])
     return _to_response(record)
 
 
