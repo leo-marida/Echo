@@ -114,7 +114,13 @@ export function MeetingReportView({ meeting, report, onTitleChange }: MeetingRep
     setStartingNew(true);
     createMeeting(null, session.backendToken)
       .then((m) => router.push(`/meetings/${m.id}`))
-      .catch(() => setStartingNew(false));
+      .catch((err) => {
+        setStartingNew(false);
+        // Stale backend token (1hr expiry) -- re-auth rather than fail silently.
+        if (err instanceof Error && err.message.includes("401")) {
+          signIn("google");
+        }
+      });
   };
 
   const saveTitle = () => {

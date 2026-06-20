@@ -18,7 +18,9 @@ export default function MeetingsHistoryPage() {
   const router = useRouter();
   const { data: session, status: sessionStatus } = useSession();
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
-  const [loadState, setLoadState] = useState<"loading" | "waking" | "ready">("loading");
+  const [loadState, setLoadState] = useState<"loading" | "waking" | "ready" | "session-expired">(
+    "loading"
+  );
   const [isStarting, setIsStarting] = useState(false);
 
   useEffect(() => {
@@ -34,8 +36,15 @@ export default function MeetingsHistoryPage() {
           setMeetings(data);
           setLoadState("ready");
         })
-        .catch(() => {
+        .catch((err) => {
           if (cancelled) return;
+          // A 401 means the backend token (1hr expiry) is stale or invalid -- that's
+          // not "the server is still waking up," and retrying with the same token
+          // forever would just loop on "Loading..." with no way out. Surface it.
+          if (err instanceof Error && err.message.includes("401")) {
+            setLoadState("session-expired");
+            return;
+          }
           setLoadState(Date.now() - startedAt > SLOW_WAKE_THRESHOLD_MS ? "waking" : "loading");
           setTimeout(attempt, RETRY_INTERVAL_MS);
         });
@@ -86,6 +95,20 @@ export default function MeetingsHistoryPage() {
         <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
           Back to home
         </Link>
+      </main>
+    );
+  }
+
+  if (loadState === "session-expired") {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
+        <p className="text-sm text-zinc-500">Your session expired. Please sign in again.</p>
+        <button
+          onClick={() => signIn("google")}
+          className="flex h-11 items-center justify-center rounded-lg bg-primary px-6 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        >
+          Sign in with Google
+        </button>
       </main>
     );
   }
